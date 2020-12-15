@@ -2,18 +2,20 @@
 	"name": "__MSG_appName__",
 	"description": "__MSG_appDesc__",
 	"default_locale": "en",
-	"version": "2.3.14",
+	"version": "2.5.4.1",
   
 	"manifest_version": 2,
 	"permissions": [
+		"alarms",
 		"activeTab",
 		"storage",
 		"tabs",
 	  	"notifications",
+		"clipboardWrite",
 	  	"management",
 		"https://*.forgeofempires.com/*",
-		"https://foe-rechner.de/",
-		"https://api.foe-rechner.de/"
+		"https://foe-rechner.de/*",
+		"https://*.foe-rechner.de/*"
 	],
 
 	"browser_action": {
@@ -33,6 +35,7 @@
 		"vendor/*.js",
 		"vendor/sounds/*.mp3",
 		"js/web/*.*",
+		"images/*.*",
 		"css/images/*.*",
 		"content/*.html"
 	],
@@ -40,9 +43,10 @@
 	"content_scripts": [
 		{
 			"matches": ["https://*.forgeofempires.com/*"],
-			"include_globs": ["*game*"],
+			"include_globs": [ "*forgeofempires.com/game*" ],
 			"run_at": "document_start",
 			"js": [
+				"js/web/_languages/js/_languages.js",
 				"js/inject.js"
 			]
 		}
