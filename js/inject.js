@@ -5,169 +5,240 @@
  * Projekt:                   foe-chrome
  *
  * erstellt von:              Daniel Siekiera <daniel.siekiera@gmail.com>
- * erstellt am:	              17.12.19, 22:44 Uhr
- * zuletzt bearbeitet:       17.12.19, 22:31 Uhr
+ * erstellt am:	              22.12.19, 14:31 Uhr
+ * zuletzt bearbeitet:       22.12.19, 13:50 Uhr
  *
  * Copyright © 2019
  *
  * **************************************************************************************
  */
 
-let ant = document.createElement('script'),
-	v = chrome.runtime.getManifest().version;
+// separate code from global scope
+{
 
-ant.src = chrome.extension.getURL('js/web/ant.js?v=' + v);
-ant.id = 'ant-script';
+	/**
+	 * Loads a JavaScript in the website. The returned promise will be resolved once the code has been loaded.
+	 * @param {string} src the URL to load
+	 * @returns {Promise<void>}
+	 */
+	function promisedLoadCode(src) {
+		return new Promise(async (resolve, reject) => {
+			let sc = document.createElement('script');
+			sc.src = src;
 
-ant.onload = function(){
-	this.remove();
-};
+			sc.addEventListener('load', function() {
+				this.remove();
+				resolve();
+			});
+			sc.addEventListener('error', function() {
+				console.error('error loading script '+src);
+				this.remove();
+				reject();
+			});
 
+			while (!document.head && !document.documentElement) await new Promise((resolve) => {
+				// @ts-ignore
+				requestIdleCallback(resolve);
+			});
 
-function checkForDOM() {
-	if (document.body && document.head) {
-		document.head.prepend(ant);
-	} else {
-		requestIdleCallback(checkForDOM);
+			(document.head || document.documentElement).appendChild(sc);
+		});
 	}
-}
-requestIdleCallback(checkForDOM);
 
 
+	// check whether jQuery has been loaded in the DOM
+	// => Catch jQuery Loaded event
+	const jQueryLoading = new Promise(resolve => {
+		window.addEventListener('foe-helper#jQuery-loaded', evt => {
+			resolve();
+		}, {capture: false, once: true, passive: true});
+	});
 
-let tid = setInterval(InjectCSS, 0),
-	PossibleLangs = ['de','en','fr','es'],
-	lng = chrome.i18n.getUILanguage(),
-	uLng = localStorage.getItem('user-language');
 
-// wir brauchen nur den ersten Teil
-if(lng.indexOf('-') > 0)
-{
-	lng = lng.split('-')[0];
-}
+	const v = chrome.runtime.getManifest().version;
 
-// gibt es eine Übersetzung?
-if(PossibleLangs.includes(lng) === false)
-{
-	lng = 'en';
-}
+	let   lng = chrome.i18n.getUILanguage();
+	const uLng = localStorage.getItem('user-language');
 
-if(uLng !== null){
-	lng = uLng;
-}
-
-console.log('lng: ', lng);
-
-let i18nJS = document.createElement('script');
-i18nJS.src = chrome.extension.getURL('js/web/i18n/' + lng + '.js?v=' + v);
-i18nJS.id = 'i18n-script';
-i18nJS.onload = function(){
-	this.remove();
-};
-(document.head || document.documentElement).appendChild(i18nJS);
-
-// prüfen ob jQuery im DOM geladen wurde
-function checkForjQuery(){
-	if (typeof jQuery === undefined){
-		requestIdleCallback(checkForjQuery);
-	} else {
-		InjectCode();
+	// we only need the first part
+	if (lng.indexOf('-') > 0) {
+		lng = lng.split('-')[0];
 	}
-}
-requestIdleCallback(checkForjQuery);
 
-function InjectCSS()
-{
-	// Dokument geladen
-	if(document.head !== null){
+	// is there a translation?
+	if (Languages.PossibleLanguages[lng] === undefined) {
+		lng = 'en';
+	}
 
-		let script = document.createElement('script');
+	if (uLng !== null){
+		lng = uLng;
+	} else {
+		// so that the language can be read out without having to change it once via the settings
+		localStorage.setItem('user-language', lng);
+	}
 
-		script.innerText = "let extID='"+ chrome.runtime.id + "',GuiLng='" + lng + "',extVersion='"+ v +"',devMode=" + !('update_url' in chrome.runtime.getManifest()) + ";";
-		document.head.appendChild(script);
+	InjectCode();
 
-		let cssFiles = [
-			'goods',
-			'style-menu',
-			'boxes'
-		];
 
-		// Stylesheet einfügen
-		for(let i in cssFiles)
-		{
-			if(!cssFiles.hasOwnProperty(i)) {
-				break;
+	let tid = setInterval(InjectCSS, 0);
+	function InjectCSS() {
+		// Document loaded
+		if(document.head !== null){
+			let MenuSetting = localStorage.getItem('SelectedMenu');
+			MenuSetting = MenuSetting ?? 'BottomBar';
+			let cssname = "_menu_"+MenuSetting.toLowerCase().replace("bar","");
+
+			let cssFiles = [
+				'variables',
+				'goods',
+				cssname,
+				'boxes'
+			];
+
+			// insert stylesheet
+			for(let i in cssFiles)
+			{
+				if(!cssFiles.hasOwnProperty(i)) {
+					break;
+				}
+
+				let css = document.createElement('link');
+				css.href = chrome.extension.getURL(`css/web/${cssFiles[i]}.css?v=${v}`);
+				css.rel = 'stylesheet';
+				document.head.appendChild(css);
 			}
 
-			let css = document.createElement('link');
-			css.href = chrome.extension.getURL('css/web/' + cssFiles[i] + '.css?v=' + v);
-			css.rel = 'stylesheet';
-			document.head.appendChild(css);
+			clearInterval(tid);
 		}
-
-		clearInterval(tid);
 	}
+
+	async function InjectCode() {
+		try {
+			// set some global variables
+			let script = document.createElement('script');
+			script.innerText = `
+				const extID='${chrome.runtime.id}',
+					extUrl='${chrome.extension.getURL('')}',
+					GuiLng='${lng}',
+					extVersion='${v}',
+					devMode=${!('update_url' in chrome.runtime.getManifest())};
+			`;
+			(document.head || document.documentElement).appendChild(script);
+			// The script was (supposedly) executed directly and can be removed again.
+			script.remove();
+
+			// load the main
+			await promisedLoadCode(chrome.extension.getURL(`js/web/_main/js/_main.js?v=${v}`));
+
+			// first wait for ant and i18n to be loaded
+			await jQueryLoading;
+
+
+			const extURL = chrome.extension.getURL(''),
+				vendorScripts = [
+					'i18njs/i18njs.min',
+					'moment/moment-with-locales.min',
+					'CountUp/jquery.easy_number_animate.min',
+					'Tabslet/jquery.tabslet.min',
+					'ScrollTo/jquery.scrollTo.min',
+					'jQuery/jquery-resizable.min',
+					'jQuery/jquery-ui.min',
+					'jQuery/jquery.toast',
+					'tooltip/tooltip',
+					'tableSorter/table-sorter',
+					'Sortable/Sortable.min',
+					'jsZip/jszip.min',
+					'date-range/lightpick',
+					'lit-html/lit-html.bundle.min',
+					'SimpleMarkdown/simple-markdown.min',
+					'dexie/dexie.min', // indexDB helper lib
+				];
+
+			// load all vendor scripts first (unknown order)
+			await Promise.all(vendorScripts.map(vendorScript => promisedLoadCode(`${extURL}vendor/${vendorScript}.js?v=${v}`)));
+
+			window.dispatchEvent(new CustomEvent('foe-helper#vendors-loaded'));
+
+			const s = [
+				'_languages',
+				'_helper',
+				'_menu',
+				'_menu_bottom',
+				'_menu_right',
+				'_menu_box',
+				'indexdb',
+				'kits',
+				'outposts',
+				'calculator',
+				'infoboard',
+				'productions',
+				'part-calc',
+				'unit',
+				'guildfights',
+				'stats',
+				'campagnemap',
+				'bonus-service',
+				'technologies',
+				'negotiation',
+				'eventchests',
+				'settings',
+				'investment',
+				'strategy-points',
+				'battle-assist',
+				'citymap',
+				'hidden-rewards',
+				'greatbuildings',
+				'alerts',
+				'notice',
+				'inventory-tracker',
+				'ws-chat',
+				'treasury',
+				'market',
+				'bluegalaxy',
+				'eventhandler',
+				'fp-collector',
+			];
+
+			// load scripts (one after the other)
+			for (let i = 0; i < s.length; i++)
+			{
+				await promisedLoadCode(`${extURL}js/web/${s[i]}/js/${s[i]}.js?v=${v}`);
+			}
+
+			window.dispatchEvent(new CustomEvent('foe-helper#loaded'));
+
+			// If #content is available, flash content has been loaded ...
+			let IsForum = false;
+			if (window !== undefined && window.location !== undefined && window.location.pathname !== undefined && window.location.pathname.includes('forum')) {
+				IsForum = true;
+            }
+
+			if (document.getElementById('content') && !IsForum ){
+				alert('You installed the FoE Helper but didn\'t switch the game to HTML5. Check that in your game settings!');
+			}
+
+		} catch (err) {
+			// make sure that the packet buffer in the FoEproxy does not fill up in the event of an incomplete loading.
+			window.dispatchEvent(new CustomEvent('foe-helper#error-loading'));
+		}
+	}
+
+	// Firefox does not support direct communication with background.js
+	// so the messages have to be forwarded.
+	// @ts-ignore
+	if (!chrome.app) {
+		// listen on the window object for special messages under '<extID> #message'
+		// and forward them if they come from this site
+		window.addEventListener(chrome.runtime.id+'#message', (/** @type {CustomEvent} */ evt) => {
+			if (evt.srcElement === window) {
+				try {
+					chrome.runtime.sendMessage(chrome.runtime.id, evt.detail);
+				} catch (err) {
+					console.error('chrome', err);
+				}
+			}
+		});
+	}
+
+	// End of the separation from the global scope
 }
-
-function InjectCode()
-{
-	let extURL = chrome.extension.getURL(''),
-		vendorScripts = [
-		'moment/moment-with-locales.min',
-		'CountUp/jquery.easy_number_animate.min',
-		'clipboard/clipboard.min',
-		'Tabslet/jquery.tabslet.min',
-		'ScrollTo/jquery.scrollTo.min',
-		'jQuery/jquery-resizable.min',
-		'tooltip/tooltip',
-		'tableSorter/table-sorter',
-		'Sortable/Sortable.min',
-		//'jedParser/jedParser'
-	];
-
-	for (let vs in vendorScripts) {
-		if (vendorScripts.hasOwnProperty(vs)) {
-			let sc = document.createElement('script');
-			sc.src = extURL + 'vendor/' + vendorScripts[vs] + '.js?v=' + v;
-			sc.onload = function () {
-				this.remove();
-			};
-			(document.head || document.documentElement).appendChild(sc);
-		}
-	}
-
-
-	let s = [
-		'helper',
-		'menu',
-		'tavern',
-		'outposts',
-		'calculator',
-		'infoboard',
-		'productions',
-        'part-calc',
-        'unit',
-		'guildfights',
-		'notes',
-		'campagnemap',
-        'technologies',
-        'negotiation',
-		'read-buildings',
-		'settings',
-		'strategy-points',
-		'citymap'
-	];
-
-	// Scripte laden
-	for (let i in s) {
-		if (s.hasOwnProperty(i)) {
-			let sc = document.createElement('script');
-			sc.src = extURL + 'js/web/' + s[i] + '.js?v=' + v;
-			sc.onload = function () {
-				this.remove();
-			};
-			(document.head || document.documentElement).appendChild(sc);
-		}
-	}
-}
-
